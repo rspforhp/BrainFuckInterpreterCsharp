@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
+using ConsoleApp1;
 using Newtonsoft.Json;
 
 public class Program
@@ -59,23 +60,211 @@ public class Program
         }
     }
 
-    public record Temp(IntPtr index, byte oldV, byte newV);
 
-    public static unsafe void Main(string[] args)
+    public abstract class BrainFckCommand 
     {
-        var watch = new Stopwatch();
-        watch.Start();
-        var filePath = args[0].Replace("\"", "");
-        if (!filePath.EndsWith(".bf")
-            || !File.Exists(filePath))
-            throw new Exception($"File isn't a .bf file or doesn't exist.");
+        
+        public virtual unsafe void Run(ref int instructionPointer, ref Span<byte> buffer,ref byte* dataPointer){}
 
-        var UniqueLoopsPresent = new HashSet<string>();
+     
+        public BrainFckCommand(BrainFckCommand other)
+        {
+            
+        }
+        public BrainFckCommand(ref Com command)
+        {
+            if (!Types.Contains(command.Type)) throw new Exception($"Bro u dumb");
+        }
 
-        // Pre running
-        using var inputStream = File.OpenText(filePath);
-        ReadOnlySpan<char> inputString = inputStream.ReadToEnd().ReplaceLineEndings("");
-        Span<Com> commands = stackalloc Com[inputString.Length];
+        public override string ToString()
+        {
+            return GetDebugString();
+        }
+
+        public abstract string GetDebugString();
+
+        public abstract ComType[] Types { get; }
+        public abstract void Optimise(ref Span<Com> commands, ref int index, IReadOnlyList<BrainFckCommand> readOnlyCommands);
+    }
+
+    public class MoveDataPointerCommand : BrainFckCommand
+    {
+        public override unsafe void Run(ref int instructionPointer, ref Span<byte> buffer, ref byte* dataPointer)
+        {
+            unchecked
+            {
+                dataPointer += MoveAmount;
+            }
+        }
+
+        public override string GetDebugString()
+        {
+            return $"adr+ {MoveAmount}";
+        }
+
+        public override ComType[] Types => new ComType[]{ ComType.incDat, ComType.decDat };
+        public int MoveAmount = 0;
+     
+        public override void Optimise(ref Span<Com> commands, ref int index, IReadOnlyList<BrainFckCommand> readOnlyCommands)
+        {
+            MoveAmount = 0;
+            var am = 0;
+            foreach (var c in commands.RepeatAmountBeforeOther(index, Till))
+            {
+                MoveAmount += c.Type == ComType.incDat ? 1 : -1;
+                am++;
+
+            }
+            index += am-1 ;
+        }
+        private static bool Till(Com com)
+        {
+            return com.Type is ComType.incDat or ComType.decDat;
+        }
+        public MoveDataPointerCommand(ref Com command) : base(ref command)
+        {
+        }
+    }
+    public class AddToDataPointerCommand : BrainFckCommand
+    {
+        public override string GetDebugString()
+        {
+            return $"dat+ {AddAmount}";
+        }
+        public override unsafe void Run(ref int instructionPointer, ref Span<byte> buffer, ref byte* dataPointer)
+        {
+            unchecked
+            {
+                (*dataPointer) +=(byte) AddAmount;
+            }
+        }
+
+        public override ComType[] Types => new ComType[]{ ComType.incAt, ComType.decAt };
+        public int AddAmount = 0;
+     
+        public override void Optimise(ref Span<Com> commands, ref int index, IReadOnlyList<BrainFckCommand> readOnlyCommands)
+        {
+            AddAmount = 0;
+            var am = 0;
+            foreach (var c in commands.RepeatAmountBeforeOther(index, Till))
+            {
+                AddAmount += c.Type == ComType.incAt ? 1 : -1;
+                am++;
+            }
+            index += am -1;
+        }
+
+        private static bool Till(Com com)
+        {
+            return com.Type is ComType.incAt or ComType.decAt;
+        }
+
+        public AddToDataPointerCommand(ref Com command) : base(ref command)
+        {
+        }
+    }
+
+    public class SectionStartCommand : BrainFckCommand
+    {
+        public override string GetDebugString()
+        {
+            return $"sec start, ends {SectionEndIndexReal}";
+        }
+        public SectionStartCommand(ref Com command) : base(ref command)
+        {
+            SectionEndIndex = command.Jmp;
+        }
+
+        public SectionEndCommand SectionEnd;
+
+        public override unsafe void Run(ref int instructionPointer, ref Span<byte> buffer, ref byte* dataPointer)
+        {
+            if (*dataPointer == 0)
+            {
+                instructionPointer =SectionEndIndexReal;
+            }
+        }
+
+        public List<BrainFckCommand> Commands;
+        public int SectionEndIndexReal;
+
+        public override ComType[] Types=> new ComType[]{ ComType.jmpFow };
+        public int SectionEndIndex;
+
+        public override void Optimise(ref Span<Com> commands, ref int index, IReadOnlyList<BrainFckCommand> readOnlyCommands)
+        {
+            
+        }
+    }
+    public class SectionEndCommand : BrainFckCommand
+    {
+        public override string GetDebugString()
+        {
+            return $"sec end, starts {SectionStartIndexReal}";
+        }
+        public SectionEndCommand(ref Com command) : base(ref command)
+        {
+            SectionStartIndex = command.Jmp;
+        }
+
+        public int SectionStartIndex;
+        public SectionStartCommand? SectionStart;
+
+        public override unsafe void Run(ref int instructionPointer, ref Span<byte> buffer, ref byte* dataPointer)
+        {
+            if (*dataPointer != 0)
+            {
+                instructionPointer =SectionStartIndexReal;
+            }
+        }       public List<BrainFckCommand> Commands;
+        public int SectionStartIndexReal;
+
+
+        public override ComType[] Types=> new ComType[]{ ComType.jmpBak };
+        public override void Optimise(ref Span<Com> commands, ref int index, IReadOnlyList<BrainFckCommand> readOnlyCommands)
+        {
+            var i = index;
+            SectionStart = (SectionStartCommand)((List<BrainFckCommand>)readOnlyCommands).Find(command => (command is SectionStartCommand sec && sec.SectionEndIndex == i))!;
+            SectionStart.SectionEnd = this;
+        }
+    }
+    public class OutInputCommand : BrainFckCommand
+    {
+        public override string GetDebugString()
+        {
+            string a=In? $"in dat" :$"out data";
+            return $"{a}";
+        }
+        public override unsafe void Run(ref int instructionPointer, ref Span<byte> buffer, ref byte* dataPointer)
+        {
+            if (In)
+            {
+                (*dataPointer) = (byte)Console.Read();
+            }
+            else
+            {
+                var b = (char)*dataPointer;
+                Console.Out.Write(b);
+                if(b=='\n') Console.Out.Flush();
+            }
+        }
+
+        public override ComType[] Types => new ComType[]{ ComType.output, ComType.input };
+        public bool In;
+     
+        public override void Optimise(ref Span<Com> commands, ref int index, IReadOnlyList<BrainFckCommand> readOnlyCommands)
+        {
+            
+        }
+        public OutInputCommand(ref Com command) : base(ref command)
+        {
+            In=command.Type == ComType.input;
+        }
+    }
+
+    
+    public static void ParseLLComs(ReadOnlySpan<char> inputString, ref Span<Com> commands)
+    {
         var lastJmpFow = new Stack<int>();
         for (var i = 0; i < inputString.Length; i++)
         {
@@ -127,137 +316,128 @@ public class Program
             }
         }
 
-        //Running
-        var instructionPointer = 0;
-        Span<byte> buffer = stackalloc byte[30000];
-        fixed (byte* spanBegginning = buffer)
+    }
+
+    public static List<BrainFckCommand> Optimise(ref Span<Com> commands)
+    {
+        var l = new List<BrainFckCommand>();
+        for (int i = 0; i < commands.Length; i++)
         {
-            var dataPointer = spanBegginning;
-            while (instructionPointer < inputString.Length)
+            ref Com c = ref commands[i];
+            BrainFckCommand command = null;
+            switch (c.Type)
             {
-                 var currentCommand = commands[instructionPointer];
+                case ComType.incDat:
+                case ComType.decDat:
+                    command = new MoveDataPointerCommand(ref c);
+                    break;
+                case ComType.incAt:
+                case ComType.decAt:
+                    command = new AddToDataPointerCommand(ref c);
+                    break;
+                case ComType.output:
+                case ComType.input:
+                    command = new OutInputCommand(ref c);
+                    break;
+                case ComType.jmpFow:
+                    command = new SectionStartCommand(ref c);
+                    break;
+                case ComType.jmpBak:
+                    command = new SectionEndCommand(ref c);
+                    break;
+                default:
+                case ComType.none:
+                    throw new ArgumentOutOfRangeException();
+            }
 
-                byte i;
-                switch (currentCommand.Type)
-                {
-                    case ComType.incDat:
-                        i = 1;
-                        while (instructionPointer + i < inputString.Length &&
-                               commands[i + instructionPointer].Type == ComType.incDat)
-                            i++;
-
-                        dataPointer += i;
-                        instructionPointer += i;
-                        break;
-                    case ComType.decDat:
-                        i = 1;
-                        while (instructionPointer + i < inputString.Length &&
-                               commands[i + instructionPointer].Type == ComType.decDat)
-                            i++;
-
-                        dataPointer -= i;
-                        instructionPointer += i;
-                        break;
-                    case ComType.incAt:
-                        i = 1;
-
-                        while (instructionPointer + i < inputString.Length &&
-                               commands[i + instructionPointer].Type == ComType.incAt)
-                            i++;
-
-
-                        (*dataPointer) += i;
-                        instructionPointer += i;
-                        break;
-                    case ComType.decAt:
-                        i = 1;
-                        while (instructionPointer + i < inputString.Length &&
-                               commands[i + instructionPointer].Type == ComType.decAt)
-                            i++;
-
-                        (*dataPointer) -= i;
-                        instructionPointer += i;
-                        break;
-                    case ComType.output:
-                        var a = (char)*dataPointer;
-                        Task.Run(async () => Console.Write(a));
-                        instructionPointer++;
-                        break;
-                    case ComType.input:
-                        *dataPointer = (byte)Console.ReadLine()[0];
-                        instructionPointer++;
-                        break;
-                    case ComType.jmpFow:
-                    {
-                      
-
-                        if (commands[instructionPointer + 1].Type == ComType.decAt &&
-                            commands[instructionPointer + 2].Type == ComType.jmpBak)
-                        {
-                            *dataPointer = 0;
-                            instructionPointer = currentCommand.Jmp+1;
-                            
-                            break;
-                        }
-
-
-                        /*
-                        var ab = commands[instructionPointer + 1].Type;
-                        if (ab is ComType.incDat or ComType.decDat)
-                        {
-                            var ib = 0;
-                            while (commands[ib + instructionPointer+1].Type ==ab) ib+= ab==ComType.incDat?1: -1;
-
-                            if (commands[ib + instructionPointer+1].Type == ComType.jmpBak)
-                            {
-                                dataPointer += ib;
-
-                                while (*dataPointer != 0) dataPointer += ib;
-
-                                instructionPointer =  currentCommand.Jmp+1 ;
-                                break;
-                            }
-                        }
-                        */
-                        if (*dataPointer == 0) instructionPointer = currentCommand.Jmp;
-
-                        instructionPointer++;
-                        break;
-                    }
-                    case ComType.jmpBak:
-                    {
-                        if (*dataPointer != 0)
-                            instructionPointer = currentCommand.Jmp;
-                        else
-                            /*    List<Temp> values = new ();
-                                foreach (var kep in Pair1[instructionPointer])
-                                {
-                                    var newVal = *((byte*)kep);
-                                    byte oldVal = (byte)(Pair2[instructionPointer] );
-                                    if(newVal!=oldVal)
-                                        values.Add( new((IntPtr)(((byte*)kep.ToPointer())-spanBegginning),oldVal,newVal));
-                                }*/
-                            //Console.WriteLine($"{string.Join("", commands.Slice(currentCommand.Jmp, instructionPointer-currentCommand.Jmp+1).ToArray())}" + $"\n" + $"{JsonConvert.SerializeObject(values)}" + $"\n DONE!");
-                            UniqueLoopsPresent.Add(
-                                $"{string.Join("", commands.Slice(currentCommand.Jmp, instructionPointer - currentCommand.Jmp + 1).ToArray())}");
-
-
-                        instructionPointer++;
-                    }
-                        break;
-                    case ComType.none:
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
+            if (command != null)
+            {
+                command.Optimise(ref commands,ref i, l);
+                l.Add(command);
+            }
+           
+        }
+        Console.WriteLine(l.Count);
+        foreach (var c in l)
+        {
+            switch (c)
+            {
+                case SectionStartCommand s1:
+                    s1.Commands = l;
+                    s1.SectionEndIndexReal=l.IndexOf(s1.SectionEnd);
+                    break;
+                case SectionEndCommand s2:
+                    s2.Commands = l;
+                    s2.SectionStartIndexReal=l.IndexOf(s2.SectionStart);
+                    break;
             }
         }
+       l = l.ExtraOptimize(Extensions.OT.FINDNZ);
+       l = l.ExtraOptimize(Extensions.OT.SETZERO);
 
-        foreach (var s in UniqueLoopsPresent)
+        Console.WriteLine(l.Count);
+
+
+        return l;
+    }
+    public static unsafe void Main(string[] args)
+    {
+        var watch = new Stopwatch();
+        watch.Start();
+        var filePath = args[0].Replace("\"", "");
+        if (!filePath.EndsWith(".bf")
+            || !File.Exists(filePath))
+            throw new Exception($"File isn't a .bf file or doesn't exist.");
+
+        var UniqueLoopsPresent = new HashSet<string>();
+
+        // Pre running
+        using var inputStream = File.OpenText(filePath);
+        ReadOnlySpan<char> inputString = inputStream.ReadToEnd().ReplaceLineEndings("");
+        Span<Com> commands = stackalloc Com[inputString.Length];
+        ParseLLComs(inputString,ref commands);
+        //Running
+        var coms = Optimise(ref commands);
+
+        
+        var instructionPointer = 0;
+        Span<byte> buffer = stackalloc byte[30000];
+        fixed (byte* b = buffer)
         {
-                Console.WriteLine(s);
+            var dataPointer = b;
+            ref var dpRef =ref dataPointer;
+            foreach (var c in coms)
+            {
+                switch (c)
+                {
+                    case SectionStartCommand s1:
+                        s1.Commands = coms;
+                        s1.SectionEndIndexReal=coms.IndexOf(s1.SectionEnd);
+                        break;
+                    case SectionEndCommand s2:
+                        s2.Commands = coms;
+                        s2.SectionStartIndexReal=coms.IndexOf(s2.SectionStart);
+                        break;
+                }
+            }
+
+            ref var ip = ref instructionPointer;
+            ref var ib = ref buffer;
+            ref var id = ref dpRef;
+            while (instructionPointer < coms.Count )
+            {
+              //  if (c is OutInputCommand) Console.Write("");
+                 coms[instructionPointer].Run(ref ip,ref ib, ref id);
+                 instructionPointer++;
+            }
         }
+     
 
 
+
+        Console.WriteLine();
         Console.WriteLine(watch.Elapsed);
     }
+
+   
 }
