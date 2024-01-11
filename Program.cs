@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json.Serialization;
 using ConsoleApp1;
 using Newtonsoft.Json;
@@ -124,6 +125,11 @@ public class Program
         public MoveDataPointerCommand(ref Com command) : base(ref command)
         {
         }
+
+        public MoveDataPointerCommand(SectionStartCommand sec):base(sec)
+        {
+            
+        }
     }
     public class AddToDataPointerCommand : BrainFckCommand
     {
@@ -162,6 +168,9 @@ public class Program
         public AddToDataPointerCommand(ref Com command) : base(ref command)
         {
         }
+        public AddToDataPointerCommand() : base(null)
+        {
+        }
     }
 
     public class SectionStartCommand : BrainFckCommand
@@ -174,7 +183,9 @@ public class Program
         {
             SectionEndIndex = command.Jmp;
         }
-
+        public SectionStartCommand() : base(null)
+        {
+        }
         public SectionEndCommand SectionEnd;
 
         public override unsafe void Run(ref int instructionPointer, ref Span<byte> buffer, ref byte* dataPointer)
@@ -205,6 +216,8 @@ public class Program
         public SectionEndCommand(ref Com command) : base(ref command)
         {
             SectionStartIndex = command.Jmp;
+        } public SectionEndCommand() : base(null)
+        {
         }
 
         public int SectionStartIndex;
@@ -228,6 +241,8 @@ public class Program
             SectionStart.SectionEnd = this;
         }
     }
+
+    public static StringBuilder sb = new StringBuilder();
     public class OutInputCommand : BrainFckCommand
     {
         public override string GetDebugString()
@@ -244,8 +259,12 @@ public class Program
             else
             {
                 var b = (char)*dataPointer;
-                Console.Out.Write(b);
-                if(b=='\n') Console.Out.Flush();
+                sb.Append(b);
+                if (b == '\n')
+                {
+                    Console.Write(sb);
+                    sb.Clear();
+                }
             }
         }
 
@@ -372,8 +391,11 @@ public class Program
                     break;
             }
         }
-       l = l.ExtraOptimize(Extensions.OT.FINDNZ);
+        l = l.ExtraOptimize(Extensions.OT.FINDNZ);
        l = l.ExtraOptimize(Extensions.OT.SETZERO);
+       l = l.ExtraOptimize(Extensions.OT.CLEANUPINITS);
+       l = l.ExtraOptimize(Extensions.OT.SWITCHLOCATION);
+             //l = l.ExtraOptimize(Extensions.OT.MULTMOVE);
 
         Console.WriteLine(l.Count);
 
@@ -398,8 +420,8 @@ public class Program
         ParseLLComs(inputString,ref commands);
         //Running
         var coms = Optimise(ref commands);
-
         
+      
         var instructionPointer = 0;
         Span<byte> buffer = stackalloc byte[30000];
         fixed (byte* b = buffer)
@@ -424,12 +446,19 @@ public class Program
             ref var ip = ref instructionPointer;
             ref var ib = ref buffer;
             ref var id = ref dpRef;
+          
             while (instructionPointer < coms.Count )
             {
               //  if (c is OutInputCommand) Console.Write("");
+              if (instructionPointer == 42)
+              {
+                  
+                  Console.Write($"");
+              }
                  coms[instructionPointer].Run(ref ip,ref ib, ref id);
                  instructionPointer++;
             }
+            Console.WriteLine();
         }
      
 
