@@ -366,7 +366,7 @@ public class Program
                     break;
                 default:
                 case ComType.none:
-                    throw new ArgumentOutOfRangeException();
+                    break;
             }
 
             if (command != null)
