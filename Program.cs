@@ -376,96 +376,53 @@ public class Program
             }
            
         }
-        Console.WriteLine(l.Count);
-        foreach (var c in l)
-        {
-            switch (c)
-            {
-                case SectionStartCommand s1:
-                    s1.Commands = l;
-                    s1.SectionEndIndexReal=l.IndexOf(s1.SectionEnd);
-                    break;
-                case SectionEndCommand s2:
-                    s2.Commands = l;
-                    s2.SectionStartIndexReal=l.IndexOf(s2.SectionStart);
-                    break;
-            }
-        }
-        l = l.ExtraOptimize(Extensions.OT.FINDNZ);
-       l = l.ExtraOptimize(Extensions.OT.SETZERO);
-       l = l.ExtraOptimize(Extensions.OT.CLEANUPINITS);
-       l = l.ExtraOptimize(Extensions.OT.SWITCHLOCATION);
-             //l = l.ExtraOptimize(Extensions.OT.MULTMOVE);
-
-        Console.WriteLine(l.Count);
-
-
+        l = l.ExtraOptimize(Extensions.OT.ALLUSEFUL);
         return l;
     }
     public static unsafe void Main(string[] args)
     {
-        var watch = new Stopwatch();
-        watch.Start();
         var filePath = args[0].Replace("\"", "");
-        if (!filePath.EndsWith(".bf")
-            || !File.Exists(filePath))
-            throw new Exception($"File isn't a .bf file or doesn't exist.");
-
-        var UniqueLoopsPresent = new HashSet<string>();
-
-        // Pre running
+          // Pre running
         using var inputStream = File.OpenText(filePath);
         ReadOnlySpan<char> inputString = inputStream.ReadToEnd().ReplaceLineEndings("");
         Span<Com> commands = stackalloc Com[inputString.Length];
         ParseLLComs(inputString,ref commands);
         //Running
         var coms = Optimise(ref commands);
-        
-      
         var instructionPointer = 0;
         Span<byte> buffer = stackalloc byte[30000];
         fixed (byte* b = buffer)
         {
             var dataPointer = b;
             ref var dpRef =ref dataPointer;
-            foreach (var c in coms)
+            for (int i = 0; i < coms.Count; i++)
             {
+                var c = coms[i];
                 switch (c)
                 {
                     case SectionStartCommand s1:
                         s1.Commands = coms;
-                        s1.SectionEndIndexReal=coms.IndexOf(s1.SectionEnd);
+                        s1.SectionEndIndexReal=coms.IndexOf(s1.SectionEnd, i);
                         break;
                     case SectionEndCommand s2:
                         s2.Commands = coms;
-                        s2.SectionStartIndexReal=coms.IndexOf(s2.SectionStart);
+                        s2.SectionStartIndexReal=coms.LastIndexOf(s2.SectionStart,i );
                         break;
                 }
             }
-
             ref var ip = ref instructionPointer;
             ref var ib = ref buffer;
             ref var id = ref dpRef;
-          
             while (instructionPointer < coms.Count )
             {
-              //  if (c is OutInputCommand) Console.Write("");
-              if (instructionPointer == 42)
-              {
-                  
-                  Console.Write($"");
-              }
                  coms[instructionPointer].Run(ref ip,ref ib, ref id);
                  instructionPointer++;
             }
-            Console.WriteLine();
         }
      
 
 
 
-        Console.WriteLine();
-        Console.WriteLine(watch.Elapsed);
     }
 
    
